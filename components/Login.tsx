@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { supabase } from '../src/supabase';
+import { auth } from '../src/firebase';
+import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { User } from '../src/types';
 import { motion } from 'motion/react';
 import { ShieldCheck } from 'lucide-react';
@@ -16,14 +17,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setLoading(true);
     setError(null);
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: window.location.origin,
-          skipBrowserRedirect: false,
-        }
-      });
-      if (error) throw error;
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
     } catch (err: any) {
       console.error('Erro no login com Google:', err);
       setError('Erro ao conectar com Google. Tente abrir o app em uma nova aba.');

@@ -1,0 +1,135 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile in the application",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique user ID matching Auth UID" },
+        "email": { "type": "string", "description": "User email address" },
+        "firstName": { "type": "string", "description": "First name" },
+        "lastName": { "type": "string", "description": "Last name" },
+        "store": { "type": "string", "description": "User's store division" },
+        "role": { "type": "string", "enum": ["vendedor", "admin"], "description": "Access level role" },
+        "photoUrl": { "type": "string", "description": "Profile picture URL" },
+        "lastLogin": { "type": "string", "description": "ISO timestamp of last login" }
+      },
+      "required": ["id", "firstName", "email"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Customer managed in CRM",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Customer unique ID" },
+        "nome": { "type": "string", "description": "Customer full name" },
+        "email": { "type": "string", "description": "Customer email" },
+        "telefone": { "type": "string", "description": "Customer phone number" },
+        "cpf": { "type": "string", "description": "Customer CPF document" },
+        "endereco": { "type": "string", "description": "Customer home address" },
+        "dataCadastro": { "type": "string", "description": "Date of registration (DD/MM/YYYY)" },
+        "totalComprado": { "type": "number", "description": "Aggregate spend sum" },
+        "pedidosCount": { "type": "integer", "description": "Count of orders" },
+        "vendedorId": { "type": "string", "description": "Associated seller user ID" },
+        "interesse": { "type": "string", "description": "Products of interest" },
+        "dataRetorno": { "type": "string", "description": "Follow-up contact date" },
+        "statusRetorno": { "type": "string", "enum": ["pendente", "finalizado"], "description": "Status of the support return" }
+      },
+      "required": ["id", "nome", "dataCadastro"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "Sales order records used for commission and metrics tracking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Sale UUID key" },
+        "numeroPedido": { "type": "string", "description": "Order receipt number" },
+        "vendedorId": { "type": "string", "description": "ID of the seller user" },
+        "clienteId": { "type": "string", "description": "ID of the associated customer" },
+        "valorProduto": { "type": "number", "description": "Revenue of products sold" },
+        "valorAssistencia": { "type": "number", "description": "Revenue of assistance services" },
+        "valorImpermeabilizacao": { "type": "number", "description": "Revenue of waterproofing sold" },
+        "total": { "type": "number", "description": "Total order amount" },
+        "data": { "type": "string", "description": "Date of sale (DD/MM/YYYY)" },
+        "timestamp": { "type": "integer", "description": "Numeric Unix timestamp millisecond" },
+        "bonusTotal": { "type": "number", "description": "Calculated total bonus" },
+        "comissaoProduto": { "type": "number", "description": "Product commission share" },
+        "servicosExtras": { "type": "array", "description": "List of active accessory bonuses" },
+        "status": { "type": "string", "enum": ["ativo", "cancelado"], "description": "Status indicator" }
+      },
+      "required": ["numeroPedido", "data", "timestamp"]
+    },
+    "Opportunity": {
+      "title": "Opportunity",
+      "description": "Deals in pipeline",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Opportunity ID" },
+        "title": { "type": "string", "description": "Deal title" },
+        "type": { "type": "string", "description": "Deal category" },
+        "value": { "type": "number", "description": "Monetary value estimate" },
+        "daysAgo": { "type": "integer", "description": "Days since entry" },
+        "stage": { "type": "string", "description": "Pipeline stage" },
+        "vendedorId": { "type": "string", "description": "Owner seller ID" },
+        "phone": { "type": "string", "description": "Contact phone" },
+        "returnDate": { "type": "string", "description": "Return schedule date" },
+        "productInterest": { "type": "string", "description": "Product category of interest" },
+        "tags": { "type": "array", "description": "Associated search tags" }
+      },
+      "required": ["id", "title", "stage"]
+    },
+    "Setting": {
+      "title": "Setting",
+      "description": "Targets configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Distinct settings code (e.g. targets)" },
+        "product": { "type": "number" },
+        "assistance": { "type": "number" },
+        "waterproofing": { "type": "number" },
+        "productCommissionRate": { "type": "number" }
+      },
+      "required": ["id"]
+    },
+    "AccessLog": {
+      "title": "AccessLog",
+      "description": "Security logs auditable events",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Deterministic serial" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "action": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["userId", "action", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile collection"
+    },
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Customer list directory"
+    },
+    "/sales/{saleId}": {
+      "schema": "Sale",
+      "description": "Completed or canceled orders records"
+    },
+    "/opportunities/{opportunityId}": {
+      "schema": "Opportunity",
+      "description": "Sales pipeline CRM deals"
+    },
+    "/settings/{settingId}": {
+      "schema": "Setting",
+      "description": "Database-wide system parameter settings"
+    },
+    "/access_logs/{logId}": {
+      "schema": "AccessLog",
+      "description": "Audit trial access logs"
+    }
+  }
+}

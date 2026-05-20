@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 1. Safety default-deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function getUserData(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             getUserData(request.auth.uid).role == 'admin';
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Collection match rules:
+
+    // --- Users ---
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // --- Customers ---
+    match /customers/{customerId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // --- Sales ---
+    match /sales/{saleId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // --- Opportunities ---
+    match /opportunities/{opportunityId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // --- Settings ---
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() || isAdmin();
+    }
+
+    // --- Access Logs ---
+    match /access_logs/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false; // Logs are immutable!
+    }
+  }
+}

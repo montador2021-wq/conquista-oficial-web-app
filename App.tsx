@@ -13,7 +13,21 @@ import { ToastContainer, ToastType } from './components/ui/Toast';
 import { NavItem, Sale, Targets, WeeklyPerformance, DashboardStats, Customer, Opportunity } from './tipos';
 import { PIPELINE_STAGES, MOCK_OPPORTUNITIES, NAVIGATION_ITEMS } from './constants';
 import { motion, AnimatePresence } from 'motion/react';
-import { supabase } from './src/supabase';
+import { db, auth, handleFirestoreError, OperationType } from './src/firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { 
+  collection, 
+  doc, 
+  getDoc, 
+  getDocs, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  where, 
+  orderBy, 
+  limit 
+} from 'firebase/firestore';
 import { 
   Plus, 
   Wrench, 
@@ -148,12 +162,14 @@ const App: React.FC = () => {
   };
 
   const logAccess = async (currentUser: User) => {
-    if (!supabase || currentUser.id === 'anon-default') return;
+    if (currentUser.id === 'anon-default') return;
     
     // O administrador entra em modo silencioso / 100% invisível no monitoramento
     if (currentUser.email === 'montador2021@gmail.com') return;
     
-    const log: Omit<AccessLog, 'id'> = {
+    const logId = crypto.randomUUID();
+    const log: AccessLog = {
+      id: logId,
       userId: currentUser.id,
       userName: `${currentUser.firstName} ${currentUser.lastName}`,
       store: currentUser.store,
@@ -162,9 +178,9 @@ const App: React.FC = () => {
     };
 
     try {
-      await supabase.from('access_logs').insert([log]);
+      await setDoc(doc(db, 'access_logs', logId), log);
       // Atualizar lastLogin do usuário
-      await supabase.from('users').update({ lastLogin: log.timestamp }).eq('id', currentUser.id);
+      await setDoc(doc(db, 'users', currentUser.id), { lastLogin: log.timestamp }, { merge: true });
     } catch (err) {
       console.error("Erro ao registrar acesso:", err);
     }
@@ -206,12 +222,12 @@ const App: React.FC = () => {
       });
       setIsAddingOpportunity(false);
 
-      // Sincronizar com Supabase
-      console.log("Sincronizando oportunidade com Supabase...");
-      const { error } = await supabase.from('opportunities').insert([newOpp]);
-      if (error) {
-        console.error("Erro detalhado do Supabase ao inserir oportunidade:", error);
-        throw error;
+      // Sincronizar com Firestore
+      console.log("Sincronizando oportunidade com Firestore...");
+      try {
+        await setDoc(doc(db, 'opportunities', newOpp.id), newOpp);
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.CREATE, `opportunities/${newOpp.id}`);
       }
       showToast('Card adicionado ao seu pipeline!', 'success');
       console.log("Oportunidade sincronizada com sucesso!");
@@ -230,13 +246,15 @@ const App: React.FC = () => {
     });
     setEditingOpportunity(null);
 
-    // Sincronizar com Supabase
+    // Sincronizar com Firestore
     try {
-      const { id, ...data } = updatedOpp;
-      const { error } = await supabase.from('opportunities').update(data).eq('id', id);
-      if (error) throw error;
+      try {
+        await setDoc(doc(db, 'opportunities', updatedOpp.id), updatedOpp);
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.UPDATE, `opportunities/${updatedOpp.id}`);
+      }
     } catch (error) {
-      console.error("Erro ao atualizar oportunidade no Supabase:", error);
+      console.error("Erro ao atualizar oportunidade no Firestore:", error);
     }
   };
 
@@ -245,20 +263,32 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    const initAuth = async () => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
-        // 1. Check if we have a Supabase session (OAuth)
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (session?.user) {
-          const email = session.user.email;
-          const fullName = session.user.user_metadata.full_name || '';
+        if (firebaseUser) {
+          const email = firebaseUser.email;
+          const fullName = firebaseUser.displayName || '';
           const firstName = fullName.split(' ')[0] || 'Vendedor';
           const lastName = fullName.split(' ').slice(1).join(' ') || 'Google';
-          const photoUrl = session.user.user_metadata.avatar_url;
+          const photoUrl = firebaseUser.photoURL || '';
 
-          // Try to search by email first
-          const { data: existingUser } = await supabase.from('users').select('*').eq('email', email).maybeSingle();
+          // Let's get the user document from Firestore
+          const userDocRef = doc(db, 'users', firebaseUser.uid);
+          let existingUser: User | null = null;
+          try {
+            const userSnap = await getDoc(userDocRef);
+            if (userSnap.exists()) {
+              existingUser = userSnap.data() as User;
+            } else if (email) {
+              const q = query(collection(db, 'users'), where('email', '==', email));
+              const snap = await getDocs(q);
+              if (!snap.empty) {
+                existingUser = snap.docs[0].data() as User;
+              }
+            }
+          } catch (err: any) {
+            handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
+          }
 
           if (existingUser) {
             const loggedUser = existingUser as User;
@@ -268,7 +298,7 @@ const App: React.FC = () => {
           } else {
             // New Google User - Auto Register
             const newUser: User = {
-              id: session.user.id,
+              id: firebaseUser.uid,
               email: email || undefined,
               firstName,
               lastName,
@@ -276,44 +306,36 @@ const App: React.FC = () => {
               password: 'oauth-protected',
               role: (email === 'montador2021@gmail.com') ? 'admin' : 'vendedor',
               lastLogin: new Date().toISOString(),
-              photoUrl: photoUrl || "https://picsum.photos/seed/" + session.user.id + "/100/100"
+              photoUrl: photoUrl || "https://picsum.photos/seed/" + firebaseUser.uid + "/100/100"
             };
-            await supabase.from('users').upsert([newUser]);
+            try {
+              await setDoc(doc(db, 'users', newUser.id), newUser);
+            } catch (err: any) {
+              handleFirestoreError(err, OperationType.CREATE, `users/${newUser.id}`);
+            }
             setUser(newUser);
             localStorage.setItem('currentUser', JSON.stringify(newUser));
             logAccess(newUser);
           }
         } else {
-          // 2. Fallback to localStorage (Traditional login)
+          // Fallback to localStorage (traditional login)
           const storedUser = localStorage.getItem('currentUser');
           if (storedUser) {
             const parsedUser = JSON.parse(storedUser);
             setUser(parsedUser);
             logAccess(parsedUser);
+          } else {
+            setUser(null);
           }
         }
       } catch (err) {
-        console.error("Auth init error:", err);
+        console.error("Auth state change handling error:", err);
       } finally {
         setLoading(false);
       }
-    };
-
-    initAuth();
-
-    // Listen for auth changes (Login/Logout from other tabs or after OAuth redirect)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT') {
-        setUser(null);
-        localStorage.removeItem('currentUser');
-      } else if (event === 'SIGNED_IN' && session) {
-        initAuth();
-      }
     });
 
-    return () => {
-      subscription.unsubscribe();
-    };
+    return () => unsubscribe();
   }, []);
   
   // Monitorar conexão e PWA
@@ -325,16 +347,23 @@ const App: React.FC = () => {
       if (pending.length > 0) {
         for (const sale of pending) {
           try {
-            const { error } = await supabase.from('sales').insert([sale]);
-            if (error) throw error;
+            try {
+              await setDoc(doc(db, 'sales', sale.id), sale);
+            } catch (err: any) {
+              handleFirestoreError(err, OperationType.CREATE, `sales/${sale.id}`);
+            }
             // Atualizar estatísticas do cliente se vinculado
             if (sale.clienteId) {
               const customer = customers.find(c => c.id === sale.clienteId);
               if (customer) {
-                await supabase.from('customers').update({
-                  totalComprado: (customer.totalComprado || 0) + sale.total,
-                  pedidosCount: (customer.pedidosCount || 0) + 1
-                }).eq('id', sale.clienteId);
+                try {
+                  await setDoc(doc(db, 'customers', sale.clienteId), {
+                    totalComprado: (customer.totalComprado || 0) + sale.total,
+                    pedidosCount: (customer.pedidosCount || 0) + 1
+                  }, { merge: true });
+                } catch (err: any) {
+                  handleFirestoreError(err, OperationType.UPDATE, `customers/${sale.clienteId}`);
+                }
               }
             }
           } catch (error) {
@@ -360,70 +389,71 @@ const App: React.FC = () => {
       setDeferredPrompt(null);
     });
     
-    // Carregar dados do Supabase com mais robustez
+    // Carregar dados do Firestore com mais robustez
     const loadData = async () => {
       if (!user) return;
 
       // Se for admin, buscar lista de vendedores e logs de acesso
       if (isAdmin) {
         try {
-          const { data: vendedoresData } = await supabase.from('users').select('*');
-          if (vendedoresData) {
-            // Ocultar a conta do administrador da lista de vendedores monitorados
-            const filtered = (vendedoresData as User[]).filter(v => v.email !== 'montador2021@gmail.com');
-            setVendedores(filtered);
-          }
+          const vendedoresQuery = query(collection(db, 'users'));
+          const snapVend = await getDocs(vendedoresQuery);
+          const vendedoresData = snapVend.docs.map(d => d.data() as User);
+          const filtered = vendedoresData.filter(v => v.email !== 'montador2021@gmail.com');
+          setVendedores(filtered);
           
-          const { data: logsData } = await supabase.from('access_logs').select('*').order('timestamp', { ascending: false }).limit(150);
-          if (logsData) setAccessLogs(logsData as AccessLog[]);
-        } catch (err) {
+          const logsQuery = query(collection(db, 'access_logs'), orderBy('timestamp', 'desc'), limit(150));
+          const snapLogs = await getDocs(logsQuery);
+          const logsData = snapLogs.docs.map(d => d.data() as AccessLog);
+          setAccessLogs(logsData);
+        } catch (err: any) {
           console.error("Erro ao buscar dados do administrador:", err);
+          handleFirestoreError(err, OperationType.LIST, 'access_logs');
         }
       }
 
       // Carregar do localStorage primeiro para rapidez
       const localOpps = localStorage.getItem(OPPORTUNITIES_KEY);
       if (localOpps) setOpportunities(JSON.parse(localOpps));
-
-      if (!supabase) return;
       
-      console.log("Buscando dados no Supabase...");
+      console.log("Buscando dados no Firestore...");
       try {
-        let query = supabase.from('sales').select('*');
+        let salesQ = query(collection(db, 'sales'));
         
         // Se não for admin, filtra apenas as próprias vendas
         if (!isAdmin) {
-          query = query.eq('vendedorId', user.id);
+          salesQ = query(collection(db, 'sales'), where('vendedorId', '==', user.id));
         } else if (viewingVendedorId) {
-          query = query.eq('vendedorId', viewingVendedorId);
+          salesQ = query(collection(db, 'sales'), where('vendedorId', '==', viewingVendedorId));
         }
 
-        const { data: salesData, error: salesError } = await query;
-        if (salesError) throw salesError;
+        const salesSnap = await getDocs(salesQ);
+        const salesData = salesSnap.docs.map(docSnap => docSnap.data());
         
         console.log("Vendas carregadas:", salesData);
         if (salesData) {
           const mappedSales = salesData.map((s: any) => ({
             ...s,
-            id: s.id || s.uuid || s.id_venda || s.venda_id,
-            vendedorId: s.vendedorId || s.vendedor_id,
-            clienteId: s.clienteId || s.cliente_id,
-            numeroPedido: s.numeroPedido || s.numero_pedido || s.pedido,
-            valorProduto: s.valorProduto || s.valor_produto || s.produto || 0,
-            valorAssistencia: s.valorAssistencia || s.valor_assistencia || s.assistencia || 0,
-            valorImpermeabilizacao: s.valorImpermeabilizacao || s.valor_impermeabilizacao || s.impermeabilizacao || 0,
-            bonusTotal: s.bonusTotal || s.bonus_total || 0,
-            comissaoProduto: s.comissaoProduto || s.comissao_produto || 0,
-            servicosExtras: Array.isArray(s.servicosExtras) ? s.servicosExtras : (typeof s.servicos_extras === 'string' ? JSON.parse(s.servicos_extras) : (s.servicos_extras || [])),
+            id: s.id,
+            vendedorId: s.vendedorId,
+            clienteId: s.clienteId,
+            numeroPedido: s.numeroPedido,
+            valorProduto: s.valorProduto || 0,
+            valorAssistencia: s.valorAssistencia || 0,
+            valorImpermeabilizacao: s.valorImpermeabilizacao || 0,
+            bonusTotal: s.bonusTotal || 0,
+            comissaoProduto: s.comissaoProduto || 0,
+            servicosExtras: Array.isArray(s.servicosExtras) ? s.servicosExtras : [],
             data: s.data || new Date(s.timestamp || Date.now()).toLocaleDateString('pt-BR'),
-            timestamp: s.timestamp || (s.created_at ? new Date(s.created_at).getTime() : Date.now()),
+            timestamp: s.timestamp || Date.now(),
             status: s.status || 'ativo'
           }));
           setSavedSales(mappedSales as Sale[]);
           localStorage.setItem(STORAGE_KEY, JSON.stringify(mappedSales));
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Erro ao buscar vendas:", err);
+        handleFirestoreError(err, OperationType.LIST, 'sales');
       }
 
       try {
@@ -434,27 +464,34 @@ const App: React.FC = () => {
         }
 
         // Metas agora podem ser individuais ou globais. Vamos tentar buscar por vendedorId primeiro.
-        let targetsQuery = supabase.from('settings').select('*').eq('id', `targets_${user.id}`).single();
-        let { data: targetsData } = await targetsQuery;
-
-        if (!targetsData) {
-          // Se não tiver individual, tenta a global
-          const { data: globalTargets } = await supabase.from('settings').select('*').eq('id', 'targets').single();
-          targetsData = globalTargets;
+        const targetId = `targets_${user.id}`;
+        let targetsData: any = null;
+        try {
+          const tSnap = await getDoc(doc(db, 'settings', targetId));
+          if (tSnap.exists()) {
+            targetsData = tSnap.data();
+          } else {
+            // Se não tiver individual, tenta a global
+            const gSnap = await getDoc(doc(db, 'settings', 'targets'));
+            if (gSnap.exists()) {
+              targetsData = gSnap.data();
+            }
+          }
+        } catch (err: any) {
+          handleFirestoreError(err, OperationType.GET, `settings/${targetId}`);
         }
 
         if (targetsData) {
-          // Merge robusto: tenta pegar campos diretos ou aninhados (compatibilidade)
           const mergedTargets: Targets = {
             ...DEFAULT_TARGETS,
             ...targetsData,
-            product: Number(targetsData.product || targetsData.faturamento_meta || DEFAULT_TARGETS.product),
-            assistance: Number(targetsData.assistance || targetsData.assistencia_meta || DEFAULT_TARGETS.assistance),
-            waterproofing: Number(targetsData.waterproofing || targetsData.impermeabilizacao_meta || DEFAULT_TARGETS.waterproofing),
+            product: Number(targetsData.product ?? DEFAULT_TARGETS.product),
+            assistance: Number(targetsData.assistance ?? DEFAULT_TARGETS.assistance),
+            waterproofing: Number(targetsData.waterproofing ?? DEFAULT_TARGETS.waterproofing),
             metaAtivacao: { 
-              product: targetsData.metaAtivacao?.product ?? targetsData.product_active ?? DEFAULT_TARGETS.metaAtivacao.product,
-              assistance: targetsData.metaAtivacao?.assistance ?? targetsData.assistance_active ?? DEFAULT_TARGETS.metaAtivacao.assistance,
-              waterproofing: targetsData.metaAtivacao?.waterproofing ?? targetsData.waterproofing_active ?? DEFAULT_TARGETS.metaAtivacao.waterproofing,
+              product: targetsData.metaAtivacao?.product ?? DEFAULT_TARGETS.metaAtivacao.product,
+              assistance: targetsData.metaAtivacao?.assistance ?? DEFAULT_TARGETS.metaAtivacao.assistance,
+              waterproofing: targetsData.metaAtivacao?.waterproofing ?? DEFAULT_TARGETS.metaAtivacao.waterproofing,
             },
             premiacaoExtra: { ...DEFAULT_TARGETS.premiacaoExtra, ...(targetsData.premiacaoExtra || {}) },
             serviceBonuses: { ...DEFAULT_TARGETS.serviceBonuses, ...(targetsData.serviceBonuses || {}) },
@@ -469,72 +506,74 @@ const App: React.FC = () => {
       }
 
       try {
-        let query = supabase.from('customers').select('*');
+        let customersQ = query(collection(db, 'customers'));
         if (!isAdmin) {
-          query = query.eq('vendedorId', user.id);
+          customersQ = query(collection(db, 'customers'), where('vendedorId', '==', user.id));
         } else if (viewingVendedorId) {
-          query = query.eq('vendedorId', viewingVendedorId);
+          customersQ = query(collection(db, 'customers'), where('vendedorId', '==', viewingVendedorId));
         }
 
-        const { data: customersData } = await query;
+        const custSnap = await getDocs(customersQ);
+        const customersData = custSnap.docs.map(docSnap => docSnap.data());
+        
         if (customersData) {
           const mappedCustomers = customersData.map((c: any) => ({
             ...c,
-            id: c.id || c.uuid || c.id_cliente || c.cliente_id,
-            vendedorId: c.vendedorId || c.vendedor_id,
-            totalComprado: Number(c.totalComprado || c.total_comprado || 0),
-            pedidosCount: Number(c.pedidosCount || c.pedidos_count || 0)
+            id: c.id,
+            vendedorId: c.vendedorId,
+            totalComprado: Number(c.totalComprado || 0),
+            pedidosCount: Number(c.pedidosCount || 0)
           }));
           setCustomers(mappedCustomers as Customer[]);
           localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(mappedCustomers));
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Erro ao buscar clientes:", err);
+        handleFirestoreError(err, OperationType.LIST, 'customers');
       }
       
       try {
-        console.log("Buscando oportunidades no Supabase...");
-        let query = supabase.from('opportunities').select('*');
+        console.log("Buscando oportunidades no Firestore...");
+        let oppsQ = query(collection(db, 'opportunities'));
         if (!isAdmin) {
-          query = query.eq('vendedorId', user.id);
+          oppsQ = query(collection(db, 'opportunities'), where('vendedorId', '==', user.id));
         } else if (viewingVendedorId) {
-          query = query.eq('vendedorId', viewingVendedorId);
+          oppsQ = query(collection(db, 'opportunities'), where('vendedorId', '==', viewingVendedorId));
         }
 
-        const { data: oppsData, error: oppsError } = await query;
-        if (oppsError) throw oppsError;
+        const oppsSnap = await getDocs(oppsQ);
+        const oppsData = oppsSnap.docs.map(docSnap => docSnap.data());
         
         if (oppsData) {
           console.log("Oportunidades brutas do DB:", oppsData);
           const mappedOpps = oppsData.map((o: any) => {
-            const vId = o.vendedorId || o.vendedor_id || o.vendedorid || 'unknown';
-            const pInt = o.productInterest || o.product_interest || o.interesse || '';
-            const rDate = o.returnDate || o.return_date || o.data_retorno || '';
-            const title = o.title || o.titulo || o.nome || 'Sem título';
-            const stage = o.stage || o.estagio || 'lead';
+            const vId = o.vendedorId || 'unknown';
+            const pInt = o.productInterest || '';
+            const rDate = o.returnDate || '';
+            const title = o.title || 'Sem título';
+            const stage = o.stage || 'lead';
             
             return {
               ...o,
-              id: o.id || o.uuid || `db-${Math.random()}`,
+              id: o.id,
               title,
               stage,
               productInterest: pInt,
               returnDate: rDate,
               vendedorId: vId,
-              value: Number(o.value || o.valor || 0),
-              user: typeof o.user === 'string' ? JSON.parse(o.user) : (o.user || { name: user.firstName, avatar: user.photoUrl || 'https://picsum.photos/seed/u1/40/40' }),
-              tags: Array.isArray(o.tags) ? o.tags : (typeof o.tags === 'string' ? JSON.parse(o.tags) : [])
+              value: Number(o.value || 0),
+              user: (o.user || { name: user.firstName, avatar: user.photoUrl || 'https://picsum.photos/seed/u1/40/40' }),
+              tags: Array.isArray(o.tags) ? o.tags : []
             };
           });
           
           console.log("Oportunidades mapeadas finais:", mappedOpps);
-          if (mappedOpps.length > 0 || (localOpps && JSON.parse(localOpps).length === 0)) {
-            setOpportunities(mappedOpps as Opportunity[]);
-            localStorage.setItem(OPPORTUNITIES_KEY, JSON.stringify(mappedOpps));
-          }
+          setOpportunities(mappedOpps as Opportunity[]);
+          localStorage.setItem(OPPORTUNITIES_KEY, JSON.stringify(mappedOpps));
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Erro ao buscar oportunidades:", err);
+        handleFirestoreError(err, OperationType.LIST, 'opportunities');
       }
     };
 
@@ -569,15 +608,15 @@ const App: React.FC = () => {
       showToast('Configurações salvas localmente!', 'success');
       setActiveNav(NavItem.Resumos);
 
-      // 3. Sincronizar com Supabase em background (sem await para não travar a UI)
+      // 3. Sincronizar com Firestore em background (sem await para não travar a UI)
       (async () => {
         try {
-          const { error } = await supabase.from('settings').upsert({ id: targetId, ...newTargets });
-          if (error) {
-            console.error("Erro Supabase ao sincronizar metas:", error);
-          } else {
-            console.log("Metas sincronizadas com sucesso no Supabase");
+          try {
+            await setDoc(doc(db, 'settings', targetId), { id: targetId, ...newTargets });
+          } catch (err: any) {
+            handleFirestoreError(err, OperationType.CREATE, `settings/${targetId}`);
           }
+          console.log("Metas sincronizadas com sucesso no Firestore");
         } catch (err) {
           console.error("Erro crítico na sincronização em background:", err);
         }
@@ -622,17 +661,11 @@ const App: React.FC = () => {
 
     try {
       console.log("Sincronizando cancelamento em background:", sale.id);
-      const query = supabase.from('sales').update({ status: 'cancelado' }).eq('id', sale.id);
-      
-      if (user?.id && user.id !== 'user-default') {
-        query.eq('vendedorId', user.id);
-      }
-      
-      const { error } = await query;
-      if (error) {
-        console.error("Erro ao sincronizar cancelamento:", error);
-      } else {
+      try {
+        await setDoc(doc(db, 'sales', sale.id), { status: 'cancelado' }, { merge: true });
         console.log("Cancelamento sincronizado com sucesso!");
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.UPDATE, `sales/${sale.id}`);
       }
     } catch (error) {
       console.error("Erro estrutural ao cancelar venda:", error);
@@ -657,16 +690,11 @@ const App: React.FC = () => {
 
     try {
       console.log("Sincronizando exclusão em background:", sale.id);
-      const query = supabase.from('sales').delete().eq('id', sale.id);
-      if (user?.id && user.id !== 'user-default') {
-        query.eq('vendedorId', user.id);
-      }
-      
-      const { error } = await query;
-      if (error) {
-        console.error("Erro Supabase ao sincronizar exclusão:", error);
-      } else {
+      try {
+        await deleteDoc(doc(db, 'sales', sale.id));
         console.log("Exclusão sincronizada com sucesso!");
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.DELETE, `sales/${sale.id}`);
       }
     } catch (error) {
       console.error("Erro estrutural ao excluir venda:", error);
@@ -675,7 +703,7 @@ const App: React.FC = () => {
 
   const handleLogout = async () => {
     localStorage.removeItem('currentUser');
-    await supabase.auth.signOut();
+    await signOut(auth);
     setUser(null);
     window.location.reload();
   };
@@ -691,16 +719,15 @@ const App: React.FC = () => {
       const [year, month, day] = newSaleData.customDate.split('-').map(Number);
       const customDateObj = new Date(year, month - 1, day);
       saleDateStr = `${day.toString().padStart(2, '0')}/${month.toString().padStart(2, '0')}/${year}`;
-      // Usar a data customizada mas com o horário atual se for hoje, ou meia noite se for passado
-      // Na verdade, timestamp é usado para ordenação. Se for um dia passado, melhor ser meia noite do dia.
       saleTimestamp = customDateObj.getTime();
     }
 
+    const saleId = crypto.randomUUID();
     const saleObj: Sale = {
-      id: crypto.randomUUID(), // Gera um ID único localmente
+      id: saleId,
       numeroPedido: newSaleData.pedido,
       vendedorId: user?.id || 'unknown',
-      clienteId: newSaleData.clienteId,
+      clienteId: newSaleData.clienteId || null,
       valorProduto: newSaleData.produto,
       valorAssistencia: newSaleData.assistencia,
       valorImpermeabilizacao: newSaleData.impermeabilizacao,
@@ -721,15 +748,17 @@ const App: React.FC = () => {
     // 2. Redirecionar imediatamente
     setActiveNav(NavItem.ResumoPedido);
 
-    // 3. Tentar sincronizar com Supabase
+    // 3. Tentar sincronizar com Firestore
     try {
-      console.log("Tentando sincronizar com Supabase...");
-      const { error } = await supabase.from('sales').insert([saleObj]);
-      if (error) throw error;
+      console.log("Tentando sincronizar com Firestore...");
+      try {
+        await setDoc(doc(db, 'sales', saleId), saleObj);
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.CREATE, `sales/${saleId}`);
+      }
       console.log("Sincronizado com sucesso!");
     } catch (error) {
       console.warn("Erro ao sincronizar, salvando para depois:", error);
-      // Salva na fila de pendentes para tentar novamente quando voltar online
       const pending = JSON.parse(localStorage.getItem('pending_sales') || '[]');
       localStorage.setItem('pending_sales', JSON.stringify([...pending, saleObj]));
     }
@@ -855,9 +884,10 @@ const App: React.FC = () => {
   }, [savedSales, targets]);
 
   const addCustomer = async (data: Omit<Customer, 'id' | 'dataCadastro' | 'totalComprado' | 'pedidosCount'>) => {
+    const customerId = crypto.randomUUID();
     const newCustomer: Customer = {
       ...data,
-      id: crypto.randomUUID(),
+      id: customerId,
       dataCadastro: new Date().toLocaleDateString('pt-BR'),
       totalComprado: 0,
       pedidosCount: 0,
@@ -873,9 +903,12 @@ const App: React.FC = () => {
     showToast('Cliente cadastrado!', 'success');
 
     // Sincroniza em background
-    supabase.from('customers').insert([newCustomer]).then(({ error }) => {
-      if (error) console.error("Erro ao sincronizar novo cliente:", error);
-    });
+    try {
+      await setDoc(doc(db, 'customers', customerId), newCustomer);
+    } catch (err: any) {
+      console.error("Erro ao sincronizar novo cliente:", err);
+      handleFirestoreError(err, OperationType.CREATE, `customers/${customerId}`);
+    }
   };
 
   const deleteCustomer = async (id: string) => {
@@ -888,9 +921,12 @@ const App: React.FC = () => {
     showToast('Cliente removido', 'info');
 
     // Sincroniza em background
-    supabase.from('customers').delete().eq('id', id).then(({ error }) => {
-      if (error) console.error("Erro ao sincronizar exclusão de cliente:", error);
-    });
+    try {
+      await deleteDoc(doc(db, 'customers', id));
+    } catch (err: any) {
+      console.error("Erro ao sincronizar exclusão de cliente:", err);
+      handleFirestoreError(err, OperationType.DELETE, `customers/${id}`);
+    }
   };
 
   const updateCustomer = async (updated: Customer) => {
@@ -903,10 +939,12 @@ const App: React.FC = () => {
     showToast('Cadastro atualizado!', 'success');
 
     // Sincroniza em background
-    const { id, ...data } = updated;
-    supabase.from('customers').update(data).eq('id', id).then(({ error }) => {
-      if (error) console.error("Erro ao sincronizar atualização de cliente:", error);
-    });
+    try {
+      await setDoc(doc(db, 'customers', updated.id), updated);
+    } catch (err: any) {
+      console.error("Erro ao sincronizar atualização de cliente:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `customers/${updated.id}`);
+    }
   };
 
   const renderContent = () => {
