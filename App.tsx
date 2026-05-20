@@ -188,7 +188,16 @@ const App: React.FC = () => {
 
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBtn, setShowInstallBtn] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>({
+    id: 'test-admin-id',
+    email: 'montador2021@gmail.com',
+    firstName: 'Test',
+    lastName: 'Admin',
+    store: 'Loja Centro',
+    role: 'admin',
+    photoUrl: 'https://picsum.photos/seed/admin/100/100',
+    password: 'bypass-login-mode'
+  });
   const isAdmin = user?.email === 'montador2021@gmail.com' || user?.role === 'admin';
   const [loading, setLoading] = useState(true);
   const [viewingVendedorId, setViewingVendedorId] = useState<string | null>(null);
@@ -318,14 +327,23 @@ const App: React.FC = () => {
             logAccess(newUser);
           }
         } else {
-          // Fallback to localStorage (traditional login)
+          // Fallback to localStorage (traditional login) or default bypass test user
           const storedUser = localStorage.getItem('currentUser');
           if (storedUser) {
             const parsedUser = JSON.parse(storedUser);
             setUser(parsedUser);
             logAccess(parsedUser);
           } else {
-            setUser(null);
+            setUser({
+              id: 'test-admin-id',
+              email: 'montador2021@gmail.com',
+              firstName: 'Test',
+              lastName: 'Admin',
+              store: 'Loja Centro',
+              role: 'admin',
+              photoUrl: 'https://picsum.photos/seed/admin/100/100',
+              password: 'bypass-login-mode'
+            });
           }
         }
       } catch (err) {
@@ -2564,7 +2582,7 @@ const App: React.FC = () => {
 
   if (loading) return <div className="h-screen flex items-center justify-center">Carregando...</div>;
 
-  if (!user) return <Login onLogin={handleLogin} />;
+  // if (!user) return <Login onLogin={handleLogin} />;
 
   return (
     <div className="min-h-screen bg-cyber-black flex flex-col selection:bg-neon-blue/30 overflow-hidden font-sans text-white">
