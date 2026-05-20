@@ -21,8 +21,8 @@ export default defineConfig(({ mode }) => {
             name: 'Conquista App',
             short_name: 'Conquista App',
             description: 'Ecossistema de Gestão e Performance Conquista.',
-            theme_color: '#9333ea',
-            background_color: '#ffffff',
+            theme_color: '#060b26',
+            background_color: '#060b26',
             display: 'standalone',
             icons: [
               {
