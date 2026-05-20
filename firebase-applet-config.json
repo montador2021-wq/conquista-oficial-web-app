@@ -1,10 +1,10 @@
 {
-  "projectId": "quantum-crm-f82a3",
-  "appId": "1:141066092550:web:6f705b42892522474e8387",
-  "apiKey": "AIzaSyAhc4cWuuSSF2UL9SAOriPea5L77xixm6g",
-  "authDomain": "quantum-crm-f82a3.firebaseapp.com",
-  "storageBucket": "quantum-crm-f82a3.firebasestorage.app",
-  "messagingSenderId": "141066092550",
-  "measurementId": "",
+  "projectId": "vc-quantum-crm",
+  "appId": "1:636001799609:web:adc9efc7af68656b2e3a68",
+  "apiKey": "AIzaSyAjJn7_z0R8qv9Qzb25qfPlzmD8RrkBr4w",
+  "authDomain": "vc-quantum-crm.firebaseapp.com",
+  "storageBucket": "vc-quantum-crm.firebasestorage.app",
+  "messagingSenderId": "636001799609",
+  "measurementId": "G-XVVST2X9BD",
   "firestoreDatabaseId": "(default)"
 }
