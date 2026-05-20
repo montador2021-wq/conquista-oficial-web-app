@@ -4,9 +4,7 @@ import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-export const db = firebaseConfig.firestoreDatabaseId 
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app); /* CRITICAL: The app will break without this line */
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
 export const auth = getAuth();
 
 export enum OperationType {
@@ -60,17 +58,9 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
-    console.log("Conexão com o Firebase Firestore testada com sucesso!");
   } catch (error) {
-    if (error instanceof Error) {
-      console.warn("Aviso de Conexão Firebase:", error.message);
-      if (error.message.includes('offline') || error.message.includes('failed-precondition')) {
-        console.error("Please check your Firebase configuration.");
-      } else if (error.message.includes('permission-denied')) {
-        console.error("Firestore dectetou acesso recusado. Verifique as regras de segurança.");
-      } else if (error.message.includes('not-found') || error.message.includes('database')) {
-        console.error("Por favor, verifique se o banco de dados do Firestore foi criado no seu console Firebase.");
-      }
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error("Please check your Firebase configuration.");
     }
   }
 }
