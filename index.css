@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-neon-blue: #00f2ff;
+  --color-neon-green: #39ff14;
+  --color-neon-purple: #bc13fe;
+  --color-cyber-black: #060b26;
+  --color-cyber-dark: #0d153b;
+  
+  --radius-quantum: 2rem;
+}
+
+@layer base {
+  body {
+    @apply bg-[#060b26] text-white antialiased selection:bg-[#00f2ff]/30;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-black/40 backdrop-blur-xl border border-white/10 shadow-[0_0_20px_rgba(0,242,255,0.05)];
+  }
+  
+  .glass-hover {
+    @apply transition-all duration-300;
+  }
+  
+  .glass-hover:hover {
+    @apply shadow-[0_0_30px_rgba(0,242,255,0.15)] border-neon-blue/30;
+  }
+
+  .quantum-card {
+    @apply bg-cyber-dark/80 backdrop-blur-md border border-white/5 rounded-2xl p-6 transition-all duration-300 shadow-xl;
+  }
+
+  .neon-text-blue {
+    @apply text-neon-blue;
+    text-shadow: 0 0 10px rgba(0, 242, 255, 0.5);
+  }
+
+  .neon-text-green {
+    @apply text-neon-green;
+    text-shadow: 0 0 10px rgba(57, 255, 20, 0.5);
+  }
+
+  .neon-border-blue {
+    @apply border-neon-blue/50 shadow-[0_0_15px_rgba(0,242,255,0.3)];
+  }
+
+  .neon-border-green {
+    @apply border-neon-green/50 shadow-[0_0_15px_rgba(57,255,20,0.3)];
+  }
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
