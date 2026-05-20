@@ -769,6 +769,33 @@ const App: React.FC = () => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(num);
   };
 
+  const getSaleServices = (sale: Sale) => {
+    const list: { name: string; value: number; type: 'product' | 'assistance' | 'waterproofing' | 'extra' }[] = [];
+    if (sale.valorProduto > 0) {
+      list.push({ name: 'Produto', value: sale.valorProduto, type: 'product' });
+    }
+    if (sale.valorAssistencia > 0) {
+      list.push({ name: 'Assistência', value: sale.valorAssistencia, type: 'assistance' });
+    }
+    if (sale.valorImpermeabilizacao > 0) {
+      list.push({ name: 'Impermeabilização', value: sale.valorImpermeabilizacao, type: 'waterproofing' });
+    }
+    if (Array.isArray(sale.servicosExtras)) {
+      sale.servicosExtras.forEach(extra => {
+        let val = 0;
+        if (extra === 'Montagem') val = targets.serviceBonuses?.montagem || 0;
+        else if (extra === 'Lavagem') val = targets.serviceBonuses?.lavagem || 0;
+        else if (extra === 'Almofada') val = targets.serviceBonuses?.almofada || 0;
+        else if (extra === 'Pés G-Roupa' || extra === 'Pés Guarda-Roupa') val = targets.serviceBonuses?.pes_guarda_roupa || 0;
+        else if (extra === 'Impermeab.') val = targets.serviceBonuses?.impermeabilizacao_bonus || 0;
+        else if (extra === 'Bônus por Pedido') val = targets.bonusPorPedido?.valor || 5;
+
+        list.push({ name: extra, value: val, type: 'extra' });
+      });
+    }
+    return list;
+  };
+
   const stats = useMemo<DashboardStats>(() => {
     const activeSales = savedSales.filter(s => s.status !== 'cancelado');
     const pTotal = activeSales.reduce((acc, s) => acc + s.valorProduto, 0);
@@ -2193,10 +2220,20 @@ const App: React.FC = () => {
           const isCancelled = s.status === 'cancelado';
           
           text += `*Pedido #${s.numeroPedido}* (${date})${isCancelled ? ' [CANCELADO]' : ''}\n`;
-          text += `Valor: ${isCancelled ? 'R$ 0,00 (Cancelado)' : formatBRL(s.total)}\n`;
+          text += `Valor Total: ${isCancelled ? 'R$ 0,00 (Cancelado)' : formatBRL(s.total)}\n`;
           if (s.clienteId) {
             const cliente = customers.find(c => c.id === s.clienteId);
             if (cliente) text += `Cliente: ${cliente.nome}\n`;
+          }
+          
+          if (!isCancelled) {
+            const saleServices = getSaleServices(s);
+            if (saleServices.length > 0) {
+              text += `Serviços Realizados:\n`;
+              saleServices.forEach(srv => {
+                text += `  - ${srv.name}: ${formatBRL(srv.value)}\n`;
+              });
+            }
           }
           text += `----------------------------------\n`;
         });
@@ -2290,10 +2327,26 @@ const App: React.FC = () => {
                         className="flex flex-col text-left hover:opacity-70 transition-opacity"
                       >
                          <span className="text-[10px] font-black text-purple-600 underline decoration-purple-200 underline-offset-4">#{sale.numeroPedido || '---'}</span>
-                         <span className="text-[8px] font-bold text-gray-400 uppercase mt-0.5">
-                           {isValidDate ? saleDate.toLocaleDateString('pt-BR') : '---'} {isValidDate ? saleDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''}
-                         </span>
-                      </button>
+                          <span className="text-[8px] font-bold text-gray-400 uppercase mt-0.5">
+                            {isValidDate ? saleDate.toLocaleDateString('pt-BR') : '---'} {isValidDate ? saleDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''}
+                          </span>
+                          {/* LISTA DE SERVIÇOS E PRODUTOS REALIZADOS COM VALORES */}
+                          {sale.status !== 'cancelado' && (
+                            <div className="flex flex-wrap gap-1 mt-2 max-w-[200px] sm:max-w-md">
+                              {getSaleServices(sale).map((srv, sIdx) => {
+                                let badgeColor = "bg-gray-100 text-gray-700 border-gray-200/50";
+                                if (srv.type === 'assistance') badgeColor = "bg-emerald-50 text-emerald-700 border-emerald-100";
+                                if (srv.type === 'waterproofing') badgeColor = "bg-purple-50 text-purple-700 border-purple-100";
+                                if (srv.type === 'extra') badgeColor = "bg-blue-50 text-blue-700 border-blue-100";
+                                return (
+                                  <span key={sIdx} className={`text-[8px] font-bold px-1.5 py-0.5 rounded border ${badgeColor}`}>
+                                    {srv.name}: {formatBRL(srv.value)}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+                       </button>
                       <div className="flex flex-col items-end gap-1">
                          <div className="text-[11px] font-black text-emerald-600">{formatBRL(sale.total)}</div>
                          <div className="flex gap-2">
@@ -2480,6 +2533,22 @@ const App: React.FC = () => {
                   >
                      <span className="text-[10px] font-black text-purple-600 underline decoration-purple-200 underline-offset-4">#{sale.numeroPedido || '---'}</span>
                      <span className="text-[8px] font-bold text-gray-400 uppercase mt-0.5">{sale.data || '---'}</span>
+                     {/* LISTA DE SERVIÇOS REALIZADOS COM VALORES */}
+                     {sale.status !== 'cancelado' && (
+                       <div className="flex flex-wrap gap-1 mt-2 max-w-[200px] sm:max-w-md">
+                         {getSaleServices(sale).map((srv, sIdx) => {
+                           let badgeColor = "bg-gray-100 text-gray-700 border-gray-200/50";
+                           if (srv.type === 'assistance') badgeColor = "bg-emerald-50 text-emerald-700 border-emerald-100";
+                           if (srv.type === 'waterproofing') badgeColor = "bg-purple-50 text-purple-700 border-purple-100";
+                           if (srv.type === 'extra') badgeColor = "bg-blue-50 text-blue-700 border-blue-100";
+                           return (
+                             <span key={sIdx} className={`text-[8px] font-bold px-1.5 py-0.5 rounded border ${badgeColor}`}>
+                               {srv.name}: {formatBRL(srv.value)}
+                             </span>
+                           );
+                         })}
+                       </div>
+                     )}
                   </button>
                   <div className="text-right">
                      <div className="text-[11px] font-black text-emerald-600">{formatBRL(sale.bonusTotal)}</div>
@@ -2625,18 +2694,20 @@ const App: React.FC = () => {
 
               <button 
                 onClick={() => {
-                  const items = [];
-                  if (selectedSale.valorProduto > 0) items.push("Produto");
-                  if (selectedSale.valorAssistencia > 0) items.push("Assistência");
-                  if (selectedSale.valorImpermeabilizacao > 0) items.push("Impermeabilização");
-                  if (selectedSale.servicosExtras && selectedSale.servicosExtras.length > 0) items.push(...selectedSale.servicosExtras);
+                  const saleServices = getSaleServices(selectedSale);
+                  const servicesText = saleServices
+                    .map(srv => `  - ${srv.name}: ${formatBRL(srv.value)}`)
+                    .join('\n');
 
-                  const text = `Relatório Quantum Pedido #${selectedSale.numeroPedido}\n` +
-                    `Data Sincra: ${selectedSale.data}\n` +
-                    `Faturamento: ${formatBRL(selectedSale.total)}\n` +
-                    `Ganhos: ${formatBRL(selectedSale.bonusTotal)}\n` +
-                    `-------------------\n` +
-                    `Módulos: ${items.join(', ')}`;
+                  const text = `📋 *RELATÓRIO DE PEDIDO - CONQUISTA APP*\n` +
+                    `Pedido: #${selectedSale.numeroPedido}\n` +
+                    `Data: ${selectedSale.data}\n` +
+                    `Faturamento Total: ${formatBRL(selectedSale.total)}\n` +
+                    `Seus Ganhos (Rendimento): ${formatBRL(selectedSale.bonusTotal)}\n` +
+                    `----------------------------------\n` +
+                    `*DETALHAMENTO DOS SERVIÇOS:*\n` +
+                    `${servicesText || '  Nenhum serviço registrado'}\n` +
+                    `----------------------------------`;
                   
                   if (navigator.share) {
                     navigator.share({ title: `Fluxo ${selectedSale.numeroPedido}`, text });
